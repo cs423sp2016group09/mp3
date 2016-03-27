@@ -115,12 +115,16 @@ static const struct file_operations mp2_file = {
 int __init mp2_init(void)
 {
     #ifdef DEBUG
-        printk(KERN_ALERT "MP2 MODULE LOADING\n");
+        printk(KERN_ALERT "MP3 MODULE LOADING\n");
     #endif
 
     // set up procfs
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp2_file); 
+
+    #ifdef DEBUG
+        printk(KERN_ALERT "MP3 MODULE LOADED\n");
+    #endif
     
     return 0;   
 }
@@ -129,7 +133,7 @@ int __init mp2_init(void)
 void __exit mp2_exit(void)
 {
     #ifdef DEBUG
-        printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
+        printk(KERN_ALERT "MP3 MODULE UNLOADING\n");
     #endif
     
     // remove the procfs entry first so that users can't access it while we're deleting the list
@@ -137,7 +141,7 @@ void __exit mp2_exit(void)
     proc_remove(proc_dir);
     
     #ifdef DEBUG
-        printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
+        printk(KERN_ALERT "MP3 MODULE UNLOADED\n");
     #endif
 }
 
