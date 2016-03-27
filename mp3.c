@@ -29,18 +29,35 @@ static int finished_writing;
 #define READ_BUFFER_SIZE 400
 /* END FILE OPERATIONS */
 
-static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
+static void REGISTER(unsigned int pid) {
+    printk(KERN_ALERT "REGISTER called for pid: %u\n", pid);
+
+    // TODO: Everything
+}
+
+static void UNREGISTER(unsigned int pid) {
+    printk(KERN_ALERT "UNREGISTER called for pid: %u\n", pid);
+
+    // TODO: Everything
+}
+
+static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
     int copied;
     char * buf;
     char * line;
     int line_length;
     char * buf_curr_pos;
 
+
     // must return 0 to signal that we're done writing to cat
     if (finished_writing == 1) {
+        printk(KERN_ALERT "mp3_read finished writing\n");
         finished_writing = 0;
         return 0;
     } 
+
+    printk(KERN_ALERT "mp3_read called\n");
+    
     copied = 0;
 
     // allocate a buffer big enough to hold the contents
@@ -69,11 +86,13 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
     return READ_BUFFER_SIZE;
 }
 
-static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
+static ssize_t mp3_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
+    unsigned int pid;
 
-    // unsigned int pid;
+    printk(KERN_ALERT "mp3_write called\n");
+
     // unsigned long period;
     // unsigned long cputime;
     
@@ -82,37 +101,34 @@ static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t c
     copied = copy_from_user(buf, buffer, count);
     buf[count]=0;
     //parses the string and checks
-    // if (count > 0) {
-    //     char cmd = buf[0];
-    //     switch (cmd){
-    //         case 'R':
-    //             sscanf(buf + 3, "%u, %lu, %lu\n", &pid, &period, &cputime);
-    //             REGISTER(pid,period,cputime);
-    //             break;
-    //         case 'Y':
-    //             sscanf(buf + 3, "%u\n", &pid);
-    //             YIELD(pid);
-    //             break;
-    //         case 'D':
-    //             sscanf(buf + 3, "%u\n", &pid);
-    //             DEREGISTRATION(pid);
-    //             break;
-    //     }
+    if (count > 0) {
+        char cmd = buf[0];
+        // example: R 345
+        // indices: 01234
+        sscanf(buf + 2, "%u", &pid);
+        switch (cmd){
+            case 'R':
+                REGISTER(pid);
+                break;
+            case 'U':
+                UNREGISTER(pid);
+                break;
+        }
 
-    // }
+    }
     
     kfree(buf);
     return count;
 }
 
-static const struct file_operations mp2_file = {
+static const struct file_operations mp3_file = {
     .owner = THIS_MODULE, 
-    .read = mp2_read,
-    .write = mp2_write,
+    .read = mp3_read,
+    .write = mp3_write,
 };
 
-// mp2_init - Called when module is loaded
-int __init mp2_init(void)
+// mp3_init - Called when module is loaded
+int __init mp3_init(void)
 {
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADING\n");
@@ -120,7 +136,7 @@ int __init mp2_init(void)
 
     // set up procfs
     proc_dir = proc_mkdir(DIRECTORY, NULL);
-    proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp2_file); 
+    proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp3_file); 
 
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADED\n");
@@ -129,8 +145,8 @@ int __init mp2_init(void)
     return 0;   
 }
 
-// mp2_exit - Called when module is unloaded
-void __exit mp2_exit(void)
+// mp3_exit - Called when module is unloaded
+void __exit mp3_exit(void)
 {
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE UNLOADING\n");
@@ -146,5 +162,5 @@ void __exit mp2_exit(void)
 }
 
 // Register init and exit funtions
-module_init(mp2_init);
-module_exit(mp2_exit);
+module_init(mp3_init);
+module_exit(mp3_exit);
