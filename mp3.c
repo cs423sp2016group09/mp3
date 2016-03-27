@@ -6,6 +6,7 @@
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/mutex.h>
+#include <linux/vmalloc.h>
 #include "mp3_given.h"
 
 MODULE_LICENSE("GPL");
@@ -37,6 +38,11 @@ typedef struct mp3_pcb_struct {
     unsigned long minor_fault_count;
 } mp3_pcb;
 /* END PCB */
+
+/* vmalloc */
+#define PAGE_SIZE 4096
+static char *memory_buffer;
+/* end vmalloc */
 
 static void debug_print_list(void) {
     printk(KERN_ALERT "I EXIST\n");
@@ -195,6 +201,9 @@ int __init mp3_init(void)
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp3_file); 
 
+    memory_buffer = vmalloc(128 * PAGE_SIZE);
+    // TODO: set PG_reserved
+
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADED\n");
     #endif
@@ -213,6 +222,8 @@ void __exit mp3_exit(void)
     proc_remove(proc_entry);
     proc_remove(proc_dir);
     
+    vfree(memory_buffer);
+
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE UNLOADED\n");
     #endif
