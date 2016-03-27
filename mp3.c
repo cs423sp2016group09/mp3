@@ -4,6 +4,8 @@
 #include <linux/kernel.h>
 #include <linux/proc_fs.h>
 #include <linux/slab.h>
+#include <linux/list.h>
+#include <linux/mutex.h>
 #include "mp3_given.h"
 
 MODULE_LICENSE("GPL");
@@ -19,33 +21,79 @@ static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
 static int finished_writing;
 #define READ_BUFFER_SIZE 400
+#define LINE_LENGTH 40
 /* END FILE OPERATIONS */
 
 /* PCB */
-typedef struct mp3_task_struct {
+static LIST_HEAD(pcb_list_head);
+static DEFINE_MUTEX(pcb_list_mutex);
+typedef struct mp3_pcb_struct {
+    struct list_head pcb_list_node;
     struct task_struct *task;
     unsigned int pid; // TODO: maybe
-    
+
     unsigned long process_utilization;
     unsigned long major_fault_count;
     unsigned long minor_fault_count;
-} mp3_struct;
+} mp3_pcb;
 /* END PCB */
 
+static void debug_print_list(void) {
+    printk(KERN_ALERT "I EXIST\n");
+    mp3_pcb *i;
+    list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
+        printk(KERN_ALERT "Have pid: %u\n", i->pid);
+    }
+}
+
 static void REGISTER(unsigned int pid) {
-    mp3_struct pcb;
+    mp3_pcb *pcb;
+    struct task_struct *task;
+
     printk(KERN_ALERT "REGISTER called for pid: %u\n", pid);
+    task = find_task_by_pid(pid);
 
-    // get task for pid
-    pcb.task = find_task_by_pid(pid);
+    // pid not valid
+    if (task == NULL) { 
+        printk(KERN_ALERT "find_task_by_pid failed\n");
+        return;
+    }
+    
+    pcb = kmalloc(sizeof(mp3_pcb), GFP_KERNEL);
+    pcb->task = task;
+    pcb->pid = pid;
 
-    // TODO: Everything
+    mutex_lock(&pcb_list_mutex);
+    list_add(&(pcb->pcb_list_node), &pcb_list_head);
+    mutex_unlock(&pcb_list_mutex);
+
+    // debug_print_list();
+
+    // TODO: create workqueue job if the requesting process is the first
+    // one in the PCB list? Piazza question
+
+    printk(KERN_ALERT "REGISTER successful!\n");
 }
 
 static void UNREGISTER(unsigned int pid) {
+    mp3_pcb *i;
+    mp3_pcb *next;
+    
     printk(KERN_ALERT "UNREGISTER called for pid: %u\n", pid);
 
-    // TODO: Everything
+    mutex_lock(&pcb_list_mutex);
+    list_for_each_entry_safe(i, next, &pcb_list_head, pcb_list_node) {
+        if (i->pid == pid) {
+            list_del(&(i->pcb_list_node));
+            kfree(i);
+        }
+    }
+    mutex_unlock(&pcb_list_mutex);
+    
+    // debug_print_list();
+
+    // TODO: if the PCB list is empty after the delete operation, the workqueue
+    // is deleted as well
 }
 
 static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
@@ -54,7 +102,7 @@ static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, l
     char * line;
     int line_length;
     char * buf_curr_pos;
-
+    mp3_pcb *i;
 
     // must return 0 to signal that we're done writing to cat
     if (finished_writing == 1) {
@@ -69,23 +117,25 @@ static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, l
 
     // allocate a buffer big enough to hold the contents
     buf = (char *) kmalloc(READ_BUFFER_SIZE, GFP_KERNEL);
-    // memset(buf, 0, READ_BUFFER_SIZE);
-    // buf_curr_pos = buf;
+    memset(buf, 0, READ_BUFFER_SIZE);
+    buf_curr_pos = buf;
 
-    // list_for_each_entry(i, &head_task, task_node) {
+    mutex_lock(&pcb_list_mutex);
 
-    //     // allocate line long enoguh to hold the string
-    //     line = kmalloc(LINE_LENGTH, GFP_KERNEL);
-    //     memset(line, 0, LINE_LENGTH);
+    list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
+        // allocate line long enoguh to hold the string
+        line = kmalloc(LINE_LENGTH, GFP_KERNEL);
+        memset(line, 0, LINE_LENGTH);
 
-    //     sprintf(line, "PID: %u, period: %lu\n", i->pid, i->period);
-    //     line_length = strlen(line);
+        sprintf(line, "PID: %u\n", i->pid);
+        line_length = strlen(line);
         
-    //     snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
-    //     buf_curr_pos += line_length; // advance the buffer 
+        snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
+        buf_curr_pos += line_length; // advance the buffer 
 
-    //     kfree(line);
-    // }
+        kfree(line);
+    }
+    mutex_unlock(&pcb_list_mutex);
 
     copy_to_user(buffer, buf, READ_BUFFER_SIZE);
     finished_writing = 1; // return 0 on the next run
