@@ -1,17 +1,9 @@
 #define LINUX
-#include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
-#include <linux/string.h> 
 #include <linux/proc_fs.h>
-#include <linux/timer.h>
-#include <linux/uaccess.h>
-#include <linux/workqueue.h>
-#include <linux/cache.h>
-#include <linux/kthread.h>
 #include <linux/slab.h>
-#include <linux/mutex.h>
 #include "mp3_given.h"
 
 MODULE_LICENSE("GPL");
@@ -29,8 +21,23 @@ static int finished_writing;
 #define READ_BUFFER_SIZE 400
 /* END FILE OPERATIONS */
 
+/* PCB */
+typedef struct mp3_task_struct {
+    struct task_struct *task;
+    unsigned int pid; // TODO: maybe
+    
+    unsigned long process_utilization;
+    unsigned long major_fault_count;
+    unsigned long minor_fault_count;
+} mp3_struct;
+/* END PCB */
+
 static void REGISTER(unsigned int pid) {
+    mp3_struct pcb;
     printk(KERN_ALERT "REGISTER called for pid: %u\n", pid);
+
+    // get task for pid
+    pcb.task = find_task_by_pid(pid);
 
     // TODO: Everything
 }
