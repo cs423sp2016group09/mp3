@@ -7,6 +7,9 @@
 #include <linux/list.h>
 #include <linux/mutex.h>
 #include <linux/vmalloc.h>
+#include <linux/uaccess.h>
+#include <linux/workqueue.h>
+#include <linux/mm.h>
 #include "mp3_given.h"
 
 MODULE_LICENSE("GPL");
@@ -15,6 +18,7 @@ MODULE_DESCRIPTION("CS-423 MP3");
 
 #define DEBUG 1
 
+//#define PAGE_SIZE 4096
 /* FILE OPERATIONS */
 #define FILENAME "status"
 #define DIRECTORY "mp3"
@@ -24,6 +28,12 @@ static int finished_writing;
 #define READ_BUFFER_SIZE 400
 #define LINE_LENGTH 40
 /* END FILE OPERATIONS */
+
+/* Workqueue struct */
+static struct workqueue_struct *mp3_wq;
+
+/*Flag for checking pcb*/
+static int pcb_num_elements;
 
 /* PCB */
 static LIST_HEAD(pcb_list_head);
@@ -40,17 +50,36 @@ typedef struct mp3_pcb_struct {
 /* END PCB */
 
 /* vmalloc */
-#define PAGE_SIZE 4096
 static char *memory_buffer;
 /* end vmalloc */
 
+/*
 static void debug_print_list(void) {
+
+    mp3_pcb *i;	
     printk(KERN_ALERT "I EXIST\n");
-    mp3_pcb *i;
     list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
         printk(KERN_ALERT "Have pid: %u\n", i->pid);
     }
 }
+*/
+
+static void wq_fun(struct work_struct *mp3_work) {
+
+}
+
+
+static void create_wq_job(void) {
+
+	
+	struct work_struct mp3_work;	
+	INIT_WORK(&mp3_work, wq_fun);
+	mp3_wq = create_workqueue("wq");
+	queue_work(mp3_wq, &mp3_work);
+
+}
+
+	
 
 static void REGISTER(unsigned int pid) {
     mp3_pcb *pcb;
@@ -70,13 +99,15 @@ static void REGISTER(unsigned int pid) {
     pcb->pid = pid;
 
     mutex_lock(&pcb_list_mutex);
+    if(pcb_num_elements == 0) {
+    	create_wq_job();
+    }
     list_add(&(pcb->pcb_list_node), &pcb_list_head);
+    pcb_num_elements++;
     mutex_unlock(&pcb_list_mutex);
 
-    // debug_print_list();
+    // debug_print_list(); //Function is commented out above because it throws up a warning. Uncomment to use.
 
-    // TODO: create workqueue job if the requesting process is the first
-    // one in the PCB list? Piazza question
 
     printk(KERN_ALERT "REGISTER successful!\n");
 }
@@ -92,15 +123,20 @@ static void UNREGISTER(unsigned int pid) {
         if (i->pid == pid) {
             list_del(&(i->pcb_list_node));
             kfree(i);
+	    pcb_num_elements--;
         }
     }
-    mutex_unlock(&pcb_list_mutex);
-    
-    // debug_print_list();
 
-    // TODO: if the PCB list is empty after the delete operation, the workqueue
-    // is deleted as well
+	if(pcb_num_elements == 0) {
+		destroy_workqueue(mp3_wq);
+	}	
+
+    mutex_unlock(&pcb_list_mutex);
+    	   
+    // debug_print_list(); //Function is commented out above because it throws up a warning. Uncomment to use.
+
 }
+
 
 static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
     int copied;
@@ -146,7 +182,7 @@ static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, l
     copy_to_user(buffer, buf, READ_BUFFER_SIZE);
     finished_writing = 1; // return 0 on the next run
     kfree(buf);
-    return READ_BUFFER_SIZE;
+	    return READ_BUFFER_SIZE;
 }
 
 static ssize_t mp3_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
@@ -196,13 +232,14 @@ int __init mp3_init(void)
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADING\n");
     #endif
-
+    
+    pcb_num_elements = 0;
     // set up procfs
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp3_file); 
-
+	
     memory_buffer = vmalloc(128 * PAGE_SIZE);
-    // TODO: set PG_reserved
+    set_bit(PG_reserved, &virt_to_page(memory_buffer)->flags);
 
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADED\n");
