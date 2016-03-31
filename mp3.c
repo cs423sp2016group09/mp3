@@ -10,6 +10,7 @@
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <linux/mm.h>
+#include <linux/timer.h>
 #include "mp3_given.h"
 
 MODULE_LICENSE("GPL");
@@ -34,6 +35,8 @@ static struct workqueue_struct *mp3_wq;
 
 /*Flag for checking pcb*/
 static int pcb_num_elements;
+
+static void create_wq_job(void);
 
 /* PCB */
 static LIST_HEAD(pcb_list_head);
@@ -63,27 +66,44 @@ static void debug_print_list(void) {
     }
 }
 */
-
+static long counter;
 static void wq_fun(struct work_struct *mp3_work) {
-
+    printk(KERN_ALERT "Yo %lu\n", counter);
+    counter++;
+    create_wq_job();
 }
 
+static struct delayed_work mp3_work;
 
 static void create_wq_job(void) {
-
-	
-	struct work_struct mp3_work;	
-	INIT_WORK(&mp3_work, wq_fun);
-	mp3_wq = create_workqueue("wq");
-	queue_work(mp3_wq, &mp3_work);
-
+    INIT_DELAYED_WORK(&mp3_work, wq_fun);
+    queue_delayed_work(mp3_wq, &mp3_work, msecs_to_jiffies(50));
 }
+
+// // helpers for timer code
+// static struct timer_list myTimer;
+// void timerFun (unsigned long arg) {
+//     myTimer.expires = jiffies + 5 * HZ;
+//     add_timer (&myTimer); /* setup the timer again */
+    
+
+
+//     // schedule_work(&mp3_wq); // trigger the bottom half
+//     // 
+    
+    
+//     // create_wq_job();
+// }
+
+
 
 	
 
 static void REGISTER(unsigned int pid) {
     mp3_pcb *pcb;
     struct task_struct *task;
+    unsigned long currentTime;
+    unsigned long expiryTime;
 
     printk(KERN_ALERT "REGISTER called for pid: %u\n", pid);
     task = find_task_by_pid(pid);
@@ -99,7 +119,14 @@ static void REGISTER(unsigned int pid) {
     pcb->pid = pid;
 
     mutex_lock(&pcb_list_mutex);
-    if(pcb_num_elements == 0) {
+    if (pcb_num_elements == 0) {
+        // currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
+        // expiryTime = currentTime + 5 * HZ; 
+        // init_timer (&myTimer);
+        // myTimer.function = timerFun;
+        // myTimer.expires = expiryTime;
+        // myTimer.data = 0;
+        // add_timer (&myTimer);
     	create_wq_job();
     }
     list_add(&(pcb->pcb_list_node), &pcb_list_head);
@@ -117,22 +144,34 @@ static void UNREGISTER(unsigned int pid) {
     mp3_pcb *next;
     
     printk(KERN_ALERT "UNREGISTER called for pid: %u\n", pid);
-
+    // printk(KERN_ALERT "line 136\n");
     mutex_lock(&pcb_list_mutex);
+    // printk(KERN_ALERT "line 138\n");
     list_for_each_entry_safe(i, next, &pcb_list_head, pcb_list_node) {
+        // printk(KERN_ALERT "line 140\n");
         if (i->pid == pid) {
+            // printk(KERN_ALERT "line 142\n");
             list_del(&(i->pcb_list_node));
+            // printk(KERN_ALERT "line 144\n");
             kfree(i);
-	    pcb_num_elements--;
+            // printk(KERN_ALERT "line 146\n");
+    	    pcb_num_elements--;
+            // printk(KERN_ALERT "line 148\n");
         }
     }
 
-	if(pcb_num_elements == 0) {
-		destroy_workqueue(mp3_wq);
+    // printk(KERN_ALERT "line 152\n");
+	if (pcb_num_elements == 0) {
+        // printk(KERN_ALERT "line 154\n");
+        // del_timer(&myTimer);
+        // printk(KERN_ALERT "line 156\n");
+		
+        // printk(KERN_ALERT "line 158\n");
+        // mp3_wq = NULL;
 	}	
-
+    // printk(KERN_ALERT "line 161\n");
     mutex_unlock(&pcb_list_mutex);
-    	   
+    // printk(KERN_ALERT "line 163\n");
     // debug_print_list(); //Function is commented out above because it throws up a warning. Uncomment to use.
 
 }
@@ -151,7 +190,7 @@ static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, l
         printk(KERN_ALERT "mp3_read finished writing\n");
         finished_writing = 0;
         return 0;
-    } 
+    }
 
     printk(KERN_ALERT "mp3_read called\n");
     
@@ -182,7 +221,7 @@ static ssize_t mp3_read (struct file *file, char __user *buffer, size_t count, l
     copy_to_user(buffer, buf, READ_BUFFER_SIZE);
     finished_writing = 1; // return 0 on the next run
     kfree(buf);
-	    return READ_BUFFER_SIZE;
+    return READ_BUFFER_SIZE;
 }
 
 static ssize_t mp3_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
@@ -238,8 +277,10 @@ int __init mp3_init(void)
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp3_file); 
 	
+    mp3_wq = create_workqueue("wq");
+
     memory_buffer = vmalloc(128 * PAGE_SIZE);
-    set_bit(PG_reserved, &virt_to_page(memory_buffer)->flags);
+    // set_bit(PG_reserved, &virt_to_page(memory_buffer)->flags);
 
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADED\n");
@@ -259,6 +300,8 @@ void __exit mp3_exit(void)
     proc_remove(proc_entry);
     proc_remove(proc_dir);
     
+    destroy_workqueue(mp3_wq);
+
     vfree(memory_buffer);
 
     #ifdef DEBUG
