@@ -52,14 +52,28 @@ typedef struct mp3_pcb_struct {
 } mp3_pcb;
 /* END PCB */
 
+
+typedef struct memory_buffer_struct {
+
+    struct list_head mem_list_node;
+    unsigned long jiffies;
+    unsigned long major_faults;
+    unsigned long minor_faults;
+    unsigned long utime;
+    unsigned long stime;
+    unsigned long CPU_util; // not really used yet. Need to figure out how to get this. Probably need to use utime and stime to get this.
+
+} mem_queue;
+
+
 /* vmalloc */
-static char *memory_buffer;
+static mem_queue *memory_buffer;
 /* end vmalloc */
 
 /*
 static void debug_print_list(void) {
 
-    mp3_pcb *i;	
+    mp3_pcb *i;	/
     printk(KERN_ALERT "I EXIST\n");
     list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
         printk(KERN_ALERT "Have pid: %u\n", i->pid);
@@ -68,7 +82,15 @@ static void debug_print_list(void) {
 */
 static long counter;
 static void wq_fun(struct work_struct *mp3_work) {
-    printk(KERN_ALERT "Yo %lu\n", counter);
+
+    mp3_pcb *i;
+	memory_buffer->jiffies = jiffies;	
+    list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
+		//TODO: Change this so that data isn't overwritten.
+    	get_cpu_use(i->pid, &(memory_buffer->minor_faults), &(memory_buffer->major_faults), &(memory_buffer->utime), &(memory_buffer->stime));
+	}
+	// Not complete yet. Currently overwriting data.             
+    //printk(KERN_ALERT "Yo %lu\n", counter);
     counter++;
     create_wq_job();
 }
@@ -102,8 +124,8 @@ static void create_wq_job(void) {
 static void REGISTER(unsigned int pid) {
     mp3_pcb *pcb;
     struct task_struct *task;
-    unsigned long currentTime;
-    unsigned long expiryTime;
+    //unsigned long currentTime;
+    //unsigned long expiryTime;
 
     printk(KERN_ALERT "REGISTER called for pid: %u\n", pid);
     task = find_task_by_pid(pid);
