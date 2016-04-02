@@ -21,7 +21,9 @@ MODULE_DESCRIPTION("CS-423 MP3");
 
 #define QUEUE_SIZE 12000
 
-//#define PAGE_SIZE 4096
+#define MP3_PAGE_SIZE 4096
+#define MP3_MEMORY_BUFFER_PAGE_COUNT 128
+
 /* FILE OPERATIONS */
 #define FILENAME "status"
 #define DIRECTORY "mp3"
@@ -36,26 +38,6 @@ static int finished_writing;
 static struct workqueue_struct *mp3_wq;
 static void create_wq_job(void);
 
-/* Character device */
-static int chrdev_open(struct inode *i, struct file *f)
-{
-    return 0;
-}
-static int chrdev_release(struct inode *i, struct file *f)
-{
-    return 0;
-}
-static int chrdev_mmap(struct file *f, struct vm_area_struct *vas)
-{
-    return 0;
-}
-static struct file_operations chrdev_fops = {
-    .open = chrdev_open,
-    .release = chrdev_release,
-    .mmap = chrdev_mmap
-};
-static int chrdev_major;
-/* end character device */
 
 /* PCB */
 static int pcb_num_elements; /*Flag for checking pcb*/
@@ -91,6 +73,39 @@ static unsigned int write_idx;
 static mp3_sample *memory_buffer;
 /* end vmalloc */
 
+/* Character device */
+static int chrdev_open(struct inode *i, struct file *f)
+{
+    return 0;
+}
+static int chrdev_release(struct inode *i, struct file *f)
+{
+    return 0;
+}
+static int chrdev_mmap(struct file *f, struct vm_area_struct *vma)
+{
+    int i;
+    unsigned long vm_head = vma->vm_start;
+    for (i = 0; i < MP3_MEMORY_BUFFER_PAGE_COUNT; i++) {
+        int offset = i * MP3_PAGE_SIZE;
+
+        void * page_virtual_address = memory_buffer + offset;
+        unsigned long user_virtual_address = vm_head + offset;
+
+        unsigned long pfn = vmalloc_to_pfn(page_virtual_address);
+        remap_pfn_range(vma, user_virtual_address, pfn, MP3_PAGE_SIZE, vma->vm_page_prot);
+    }
+
+    return 0;
+}
+static struct file_operations chrdev_fops = {
+    .open = chrdev_open,
+    .release = chrdev_release,
+    .mmap = chrdev_mmap
+};
+static int chrdev_major;
+/* end character device */
+
 /*
 static void debug_print_list(void) {
 
@@ -101,7 +116,6 @@ static void debug_print_list(void) {
     }
 }
 */
-static long counter;
 static void wq_fun(struct work_struct *mp3_work) {
     mp3_pcb *i;
 
@@ -362,7 +376,7 @@ int __init mp3_init(void)
 
     mp3_wq = create_workqueue("wq");
 
-    memory_buffer = vmalloc(128 * PAGE_SIZE);
+    memory_buffer = vmalloc(MP3_MEMORY_BUFFER_PAGE_COUNT * MP3_PAGE_SIZE);
     // set_bit(PG_reserved, &virt_to_page(memory_buffer)->flags);
     chrdev_major = register_chrdev(0, "node", &chrdev_fops); 
 
