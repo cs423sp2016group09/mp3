@@ -19,6 +19,8 @@ MODULE_DESCRIPTION("CS-423 MP3");
 
 #define DEBUG 1
 
+#define QUEUE_SIZE 12000
+
 //#define PAGE_SIZE 4096
 /* FILE OPERATIONS */
 #define FILENAME "status"
@@ -32,13 +34,12 @@ static int finished_writing;
 
 /* Workqueue struct */
 static struct workqueue_struct *mp3_wq;
-
-/*Flag for checking pcb*/
-static int pcb_num_elements;
-
 static void create_wq_job(void);
 
+
+
 /* PCB */
+static int pcb_num_elements; /*Flag for checking pcb*/
 static LIST_HEAD(pcb_list_head);
 static DEFINE_MUTEX(pcb_list_mutex);
 typedef struct mp3_pcb_struct {
@@ -53,27 +54,28 @@ typedef struct mp3_pcb_struct {
 /* END PCB */
 
 
-typedef struct memory_buffer_struct {
+typedef struct mp3_sample_struct {
 
-    struct list_head mem_list_node;
-    unsigned long jiffies;
+    // struct list_head mem_list_node;
+    unsigned long jffs;
     unsigned long major_faults;
     unsigned long minor_faults;
-    unsigned long utime;
-    unsigned long stime;
-    unsigned long CPU_util; // not really used yet. Need to figure out how to get this. Probably need to use utime and stime to get this.
+    unsigned long cpu_util;
 
-} mem_queue;
+} mp3_sample;
 
 
 /* vmalloc */
-static mem_queue *memory_buffer;
+static unsigned int quantity_unread;
+static unsigned int read_idx;
+static unsigned int write_idx;
+static mp3_sample *memory_buffer;
 /* end vmalloc */
 
 /*
 static void debug_print_list(void) {
 
-    mp3_pcb *i;	/
+    mp3_pcb *i; /
     printk(KERN_ALERT "I EXIST\n");
     list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
         printk(KERN_ALERT "Have pid: %u\n", i->pid);
@@ -82,17 +84,49 @@ static void debug_print_list(void) {
 */
 static long counter;
 static void wq_fun(struct work_struct *mp3_work) {
-
     mp3_pcb *i;
-	memory_buffer->jiffies = jiffies;	
-    list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
-		//TODO: Change this so that data isn't overwritten.
-    	get_cpu_use(i->pid, &(memory_buffer->minor_faults), &(memory_buffer->major_faults), &(memory_buffer->utime), &(memory_buffer->stime));
-	}
-	// Not complete yet. Currently overwriting data.             
-    //printk(KERN_ALERT "Yo %lu\n", counter);
-    counter++;
-    create_wq_job();
+
+    unsigned long jffs = jiffies;
+    unsigned long major_faults = 0;
+    unsigned long minor_faults = 0;
+    unsigned long cpu_util = 0; 
+    mp3_sample *sample = &memory_buffer[write_idx];
+    if (pcb_num_elements > 0) {
+        list_for_each_entry(i, &pcb_list_head, pcb_list_node) {
+
+            unsigned long maj_flt = 0;
+            unsigned long min_flt = 0;
+            unsigned long utime = 0; 
+            unsigned long stime = 0;
+            
+            get_cpu_use(i->pid, &(maj_flt), &(min_flt), &(utime), &(stime));
+
+            major_faults += maj_flt;
+            minor_faults += min_flt;
+
+            // ask whether to divide by jiffies or jffs?
+            // TODO: this is wrong! it always does 0
+            cpu_util += ((stime + utime) / jiffies);
+        }
+
+        sample->jffs = jffs;
+        sample->major_faults = major_faults;
+        sample->minor_faults = minor_faults;
+        sample->cpu_util = cpu_util;
+        printk(KERN_ALERT "Logging sample: %lu\nmaj: %lu\nmin: %lu\ncpu: %lu\nwrite_idx:%d\nread_idx:%d\n", jffs, major_faults, minor_faults, cpu_util, write_idx, read_idx);
+
+        // they point to the same spot because the queue is full
+        // advance both pointers and don't update the quantity
+        if (write_idx == read_idx && quantity_unread == QUEUE_SIZE) {
+                read_idx = (read_idx + 1) % QUEUE_SIZE;
+                write_idx = (write_idx + 1) % QUEUE_SIZE;
+        } else {
+            write_idx = (write_idx + 1) % QUEUE_SIZE;
+            quantity_unread++;
+        }
+
+        create_wq_job();
+    }
 }
 
 static struct delayed_work mp3_work;
@@ -119,7 +153,7 @@ static void create_wq_job(void) {
 
 
 
-	
+    
 
 static void REGISTER(unsigned int pid) {
     mp3_pcb *pcb;
@@ -149,7 +183,7 @@ static void REGISTER(unsigned int pid) {
         // myTimer.expires = expiryTime;
         // myTimer.data = 0;
         // add_timer (&myTimer);
-    	create_wq_job();
+        create_wq_job();
     }
     list_add(&(pcb->pcb_list_node), &pcb_list_head);
     pcb_num_elements++;
@@ -177,20 +211,20 @@ static void UNREGISTER(unsigned int pid) {
             // printk(KERN_ALERT "line 144\n");
             kfree(i);
             // printk(KERN_ALERT "line 146\n");
-    	    pcb_num_elements--;
+            pcb_num_elements--;
             // printk(KERN_ALERT "line 148\n");
         }
     }
 
     // printk(KERN_ALERT "line 152\n");
-	if (pcb_num_elements == 0) {
+    if (pcb_num_elements == 0) {
         // printk(KERN_ALERT "line 154\n");
         // del_timer(&myTimer);
         // printk(KERN_ALERT "line 156\n");
-		
+        
         // printk(KERN_ALERT "line 158\n");
         // mp3_wq = NULL;
-	}	
+    }   
     // printk(KERN_ALERT "line 161\n");
     mutex_unlock(&pcb_list_mutex);
     // printk(KERN_ALERT "line 163\n");
@@ -298,7 +332,7 @@ int __init mp3_init(void)
     // set up procfs
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp3_file); 
-	
+
     mp3_wq = create_workqueue("wq");
 
     memory_buffer = vmalloc(128 * PAGE_SIZE);
