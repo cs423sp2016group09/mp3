@@ -36,7 +36,26 @@ static int finished_writing;
 static struct workqueue_struct *mp3_wq;
 static void create_wq_job(void);
 
-
+/* Character device */
+static int chrdev_open(struct inode *i, struct file *f)
+{
+    return 0;
+}
+static int chrdev_release(struct inode *i, struct file *f)
+{
+    return 0;
+}
+static int chrdev_mmap(struct file *f, struct vm_area_struct *vas)
+{
+    return 0;
+}
+static struct file_operations chrdev_fops = {
+    .open = chrdev_open,
+    .release = chrdev_release,
+    .mmap = chrdev_mmap
+};
+static int chrdev_major;
+/* end character device */
 
 /* PCB */
 static int pcb_num_elements; /*Flag for checking pcb*/
@@ -98,7 +117,9 @@ static void wq_fun(struct work_struct *mp3_work) {
             unsigned long min_flt = 0;
             unsigned long utime = 0; 
             unsigned long stime = 0;
-            
+            unsigned long j_utime;
+            unsigned long j_stime;
+
             get_cpu_use(i->pid, &(maj_flt), &(min_flt), &(utime), &(stime));
 
             major_faults += maj_flt;
@@ -106,14 +127,20 @@ static void wq_fun(struct work_struct *mp3_work) {
 
             // ask whether to divide by jiffies or jffs?
             // TODO: this is wrong! it always does 0
-            cpu_util += ((stime + utime) / jiffies);
+            
+
+            j_utime = cputime_to_jiffies(utime); 
+            j_stime = cputime_to_jiffies(stime);
+
+            printk(KERN_ALERT "utime:%lu\nstime:%lu\nj_utime:%lu\nj_stime:%lu\n", utime, stime, j_utime, j_stime);
+            cpu_util += ((j_stime + j_utime) * 1000 / jiffies);
         }
 
         sample->jffs = jffs;
         sample->major_faults = major_faults;
         sample->minor_faults = minor_faults;
         sample->cpu_util = cpu_util;
-        printk(KERN_ALERT "Logging sample: %lu\nmaj: %lu\nmin: %lu\ncpu: %lu\nwrite_idx:%d\nread_idx:%d\n", jffs, major_faults, minor_faults, cpu_util, write_idx, read_idx);
+        // printk(KERN_ALERT "Logging sample: %lu\nmaj: %lu\nmin: %lu\ncpu: %lu\nwrite_idx:%d\nread_idx:%d\n", jffs, major_faults, minor_faults, cpu_util, write_idx, read_idx);
 
         // they point to the same spot because the queue is full
         // advance both pointers and don't update the quantity
@@ -337,6 +364,7 @@ int __init mp3_init(void)
 
     memory_buffer = vmalloc(128 * PAGE_SIZE);
     // set_bit(PG_reserved, &virt_to_page(memory_buffer)->flags);
+    chrdev_major = register_chrdev(0, "node", &chrdev_fops); 
 
     #ifdef DEBUG
         printk(KERN_ALERT "MP3 MODULE LOADED\n");
@@ -357,6 +385,8 @@ void __exit mp3_exit(void)
     proc_remove(proc_dir);
     
     destroy_workqueue(mp3_wq);
+
+    unregister_chrdev(chrdev_major, "node");
 
     vfree(memory_buffer);
 
