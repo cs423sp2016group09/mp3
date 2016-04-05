@@ -147,7 +147,7 @@ static void wq_fun(struct work_struct *mp3_work) {
             j_stime = cputime_to_jiffies(stime);
 
             printk(KERN_ALERT "utime:%lu\nstime:%lu\nj_utime:%lu\nj_stime:%lu\n", utime, stime, j_utime, j_stime);
-            cpu_util += ((j_stime + j_utime) * 1000 / jiffies);
+            cpu_util += (j_stime + j_utime);
         }
 
         sample->jffs = jffs;
